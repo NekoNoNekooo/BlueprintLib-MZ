@@ -9,6 +9,8 @@
 #include "NavigationSystem.h"
 #include "Animation/AnimMontage.h"
 #include "Struct_CombatPositioning.h"
+#include "NavigationPath.h"
+#include "GameFramework/Pawn.h"
 
 bool UCommonBlueprintFunctionLib::EvaluateHitAnimMontage(const FCHTHitMontageInput InputStruct, const UChooserTable* ChooserTable, FCHTHitMontageOutput& OutStruct)
 {
@@ -574,9 +576,9 @@ float UCommonBlueprintFunctionLib::GetSignedAngleBetween(const FVector& Original
 
 float UCommonBlueprintFunctionLib::CalculateAttackScore(AActor* Attacker, AActor* Target, float distanceWeight, float angleWeight, float MaxAtkDist)
 {
-	const FVector ALoc = Attacker->GetActorLocation();
-	const FVector TLoc = Target->GetActorLocation();
-	const FVector ToTarget = TLoc - ALoc;
+        const FVector ALoc = Attacker->GetActorLocation();
+        const FVector TLoc = Target->GetActorLocation();
+        const FVector ToTarget = TLoc - ALoc;
 
 	// �������÷֣�Խ��Խ��
 	float Dist = FMath::Clamp(ToTarget.Size(), 0.f, MaxAtkDist);
@@ -594,7 +596,109 @@ float UCommonBlueprintFunctionLib::CalculateAttackScore(AActor* Attacker, AActor
 	float TotalScore = DistScore * distanceWeight + AngleScore * angleWeight;
 	TotalScore = FMath::GetMappedRangeValueClamped(FVector2f(0.f, 1.f),FVector2f(0.f, 100.f), TotalScore);
 
-	return TotalScore;
+        return TotalScore;
+}
+
+bool UCommonBlueprintFunctionLib::UpdateRootMotionPathFollowing(APawn* Pawn, UNavigationPath* NavigationPath, float AcceptanceRadius, float DeltaTime, float RotationInterpSpeed, ERMPathFollowingMovementMode MovementMode, FRotator FixedWorldRotation, int32& InOutPathPointIndex, FVector2D& OutBlendspaceDirection, FRotator& OutFacingRotation, bool& bOutReachedPathEnd)
+{
+        OutBlendspaceDirection = FVector2D::ZeroVector;
+        OutFacingRotation = Pawn ? Pawn->GetActorRotation() : FRotator::ZeroRotator;
+        bOutReachedPathEnd = false;
+
+        if (!Pawn || !NavigationPath)
+        {
+                return false;
+        }
+
+        const TArray<FVector>& PathPoints = NavigationPath->PathPoints;
+        if (PathPoints.Num() < 2)
+        {
+                bOutReachedPathEnd = true;
+                return false;
+        }
+
+        const int32 LastIndex = PathPoints.Num() - 1;
+        InOutPathPointIndex = FMath::Clamp(InOutPathPointIndex, 1, LastIndex);
+
+        const FVector ActorLocation = Pawn->GetActorLocation();
+        const float AcceptanceRadiusSq = FMath::Square(FMath::Max(0.f, AcceptanceRadius));
+
+        // Advance to the next path point if we are already within the acceptance radius.
+        while (InOutPathPointIndex < PathPoints.Num())
+        {
+                FVector TargetPoint = PathPoints[InOutPathPointIndex];
+                TargetPoint.Z = ActorLocation.Z;
+
+                const float DistanceSq2D = FVector2D(TargetPoint - ActorLocation).SizeSquared();
+                if (DistanceSq2D <= AcceptanceRadiusSq)
+                {
+                        if (InOutPathPointIndex >= LastIndex)
+                        {
+                                bOutReachedPathEnd = true;
+                                return false;
+                        }
+
+                        ++InOutPathPointIndex;
+                        continue;
+                }
+
+                break;
+        }
+
+        if (InOutPathPointIndex >= PathPoints.Num())
+        {
+                bOutReachedPathEnd = true;
+                return false;
+        }
+
+        FVector TargetPoint = PathPoints[InOutPathPointIndex];
+        TargetPoint.Z = ActorLocation.Z;
+
+        const FVector ToTarget = TargetPoint - ActorLocation;
+        FVector2D MoveDirection2D(ToTarget.X, ToTarget.Y);
+        if (MoveDirection2D.IsNearlyZero())
+        {
+                return false;
+        }
+
+        MoveDirection2D.Normalize();
+        const FVector WorldDirection = FVector(MoveDirection2D.X, MoveDirection2D.Y, 0.f);
+
+        const FRotator CurrentRotation = Pawn->GetActorRotation();
+        FRotator DesiredRotation = CurrentRotation;
+
+        switch (MovementMode)
+        {
+        case ERMPathFollowingMovementMode::FacePath:
+                DesiredRotation = WorldDirection.Rotation();
+                break;
+        case ERMPathFollowingMovementMode::MaintainWorldRotation:
+                DesiredRotation = FixedWorldRotation;
+                break;
+        default:
+                break;
+        }
+
+        if (RotationInterpSpeed <= 0.f)
+        {
+                OutFacingRotation = DesiredRotation;
+        }
+        else
+        {
+                OutFacingRotation = FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, RotationInterpSpeed);
+        }
+
+        Pawn->SetActorRotation(OutFacingRotation);
+
+        const FVector LocalDirection = OutFacingRotation.UnrotateVector(WorldDirection);
+        FVector2D LocalDirection2D(LocalDirection.X, LocalDirection.Y);
+        if (!LocalDirection2D.IsNearlyZero())
+        {
+                LocalDirection2D.Normalize();
+        }
+        OutBlendspaceDirection = LocalDirection2D;
+
+        return true;
 }
 
 void UCommonBlueprintFunctionLib::RM_MoveTo(UObject* WorldContextObject, struct FLatentActionInfo LatentInfo,
