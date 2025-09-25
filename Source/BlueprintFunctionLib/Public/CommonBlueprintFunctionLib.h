@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Enum_CombatPositioning.h"
+#include "ERMPathFollowingMovementMode.h"
 #include "CommonBlueprintFunctionLib.generated.h"
 
 /**
@@ -16,6 +17,7 @@ class UAnimMontage;
 struct FAttributeFloat;
 class UTask_UpdateValueDuration;
 struct FOctantSlot;
+class UNavigationPath;
 
 UCLASS()
 class BLUEPRINTFUNCTIONLIB_API UCommonBlueprintFunctionLib : public UBlueprintFunctionLibrary
@@ -86,6 +88,26 @@ public:
 
 	// =========================== ??????? ================================
 
-	UFUNCTION(BlueprintPure)
-	static float CalculateAttackScore(AActor* Attacker, AActor* Target, float distanceWeight, float angleWeight, float MaxAtkDist);
+        UFUNCTION(BlueprintPure)
+        static float CalculateAttackScore(AActor* Attacker, AActor* Target, float distanceWeight, float angleWeight, float MaxAtkDist);
+
+        /**
+         * Helper for root-motion driven AI locomotion. Consumes a pre-generated navigation path
+         * and outputs the planar movement direction (suitable for 8-way blend spaces) as well as
+         * an interpolated facing rotation.
+         *
+         * @param Pawn                               Pawn that should follow the path.
+         * @param NavigationPath                     Path instance created elsewhere (e.g. via UNavigationSystemV1).
+         * @param AcceptanceRadius                   Distance threshold used to advance to the next point (cm).
+         * @param DeltaTime                          Frame delta time used for rotation interpolation.
+         * @param RotationInterpSpeed                Interp speed for facing rotation. <= 0 means snap instantly.
+         * @param MovementMode                       Determines whether the pawn turns to face the path or keeps a fixed world rotation.
+         * @param FixedWorldRotation                 Only used when MovementMode is MaintainWorldRotation.
+         * @param InOutPathPointIndex                Index of the current target point along the path (will be advanced as needed).
+         * @param OutBlendspaceDirection             Normalized planar direction expressed in the pawn's local space.
+         * @param OutFacingRotation                  Interpolated rotation that should be applied to the pawn.
+         * @param bOutReachedPathEnd                 True once the final path point has been reached.
+         */
+        UFUNCTION(BlueprintCallable, Category = "AI|RootMotion")
+        static bool UpdateRootMotionPathFollowing(APawn* Pawn, UNavigationPath* NavigationPath, float AcceptanceRadius, float DeltaTime, float RotationInterpSpeed, ERMPathFollowingMovementMode MovementMode, FRotator FixedWorldRotation, int32& InOutPathPointIndex, FVector2D& OutBlendspaceDirection, FRotator& OutFacingRotation, bool& bOutReachedPathEnd);
 };
